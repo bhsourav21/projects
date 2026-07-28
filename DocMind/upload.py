@@ -9,7 +9,6 @@ from pinecone import Pinecone
 
 load_dotenv()
 
-# ■■ Step 1: Load the PDF ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 path = '/Users/souravbhattacharya/Documents/Code_Projects/AI_study/projects/DocMind/input'
 loader = PyPDFLoader(f"{path}/databricks_architecture_governance.pdf")
 pages = loader.load()
@@ -78,12 +77,8 @@ chunks_final = []
 for page in pages:
     chunks = hybrid_chunk(page.page_content)
     for chunk in chunks:
+        chunk["metadata"] = page.metadata
         chunks_final.append(chunk)
-
-# print(chunks_final)
-
-# for i, ch in enumerate(chunks_final):
-#     print(f"[{ch['method']:15s}] Chunk {i+1}: {ch['chars']} chars")
 
 
 # Upsert into Pinecone
@@ -105,20 +100,17 @@ for i, chunk in enumerate(chunks_final):
         "id": f"chunk-{i}",
         "values": None,          # filled in batch below
         "metadata": {
-            # "text": chunk.page_content,
             "text": chunk["text"],
-            "source": chunk.metadata.get("source", ""),
-            "page": chunk.metadata.get("page", 0),
-            "start_index": chunk.metadata.get("start_index", 0),
-            "source_filename": os.path.basename(chunk.metadata.get("source", "")),
-            "page_number": chunk.metadata.get("page", 0) + 1,  # 0-indexed → 1-indexed
+            "source": chunk["metadata"].get("source", ""),
+            "page": chunk["metadata"].get("page", 0),
+            "source_filename": os.path.basename(chunk["metadata"].get("source", "")),
+            "page_number": chunk["metadata"].get("page", 0) + 1,  # 0-indexed → 1-indexed
         }
     })
 
 # Embed and upsert in batches
 for batch_start in range(0, len(vectors), BATCH_SIZE):
     batch = vectors[batch_start : batch_start + BATCH_SIZE]
-    # texts = [chunks_final[batch_start + j].page_content for j in range(len(batch))]
     texts = [chunks_final[batch_start + j]["text"] for j in range(len(batch))]
     embeddings = get_embeddings(texts)
     for vec, emb in zip(batch, embeddings):
@@ -131,30 +123,9 @@ for batch_start in range(0, len(vectors), BATCH_SIZE):
         index.upsert(vectors=vecs, namespace=ns)
     print(f"Upserted chunks {batch_start + 1} – {batch_start + len(batch)}")
 
+
+stats = index.describe_index_stats()
+print(stats)
+
+
 print(f"\nDone. Total chunks upserted: {len(vectors)}")
-
-
-# # The most powerful production strategy combines both techniques: use regex to create coarse structural chunks
-# # (sections), then apply semantic splitting within each section to further refine at topic-shift boundaries. This
-# # keeps cost low while ensuring semantically coherent output.
-
-# # Step 1 — Regex pre-split
-# # Split the document into sections using heading or paragraph regex.
-# # Each section becomes an independent unit.
-
-# # Step 2 — Size filter 
-# # Short sections (< min_chars) are kept as-is. Sections within the target
-# # range are used directly. Only long sections (> max_chars) proceed to
-# # Step 3.
-
-# # Step 3 — Semantic sub-split
-# # Apply SemanticChunker (or the from-scratch splitter) to each oversized
-# # section, breaking it further at topic-shift boundaries.
-
-# # Step 4 — Merge tiny chunks
-# # Any chunk under min_chars remaining after semantic splitting is merged
-# # with its neighbour to avoid orphan chunks that hurt retrieval.
-
-# # Step 5 — Deduplicate & index
-# # Remove near-duplicate chunks (cosine sim > 0.98) and attach metadata
-# # (source, section title, chunk index) before embedding.
