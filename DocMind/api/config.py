@@ -17,5 +17,14 @@ class Settings(BaseSettings):
     chunk_sem_threshold_type: str = "percentile"
     chunk_sem_threshold_amt: float = 95
 
+    input_dir: str = str(Path(__file__).resolve().parent.parent / "input")
+    chat_model: str = "gpt-4o-mini"
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    dense_top_k: int = 10
+    sparse_top_k: int = 10
+    hybrid_top_k: int = 20
+    rerank_k: int = 5
+    rrf_k: int = 60
+
 
 settings = Settings()

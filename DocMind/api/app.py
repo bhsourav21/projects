@@ -5,9 +5,10 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
 from pinecone import Pinecone
+from sentence_transformers.cross_encoder import CrossEncoder
 
 from .config import settings
-from .routers.upload import router as upload_router
+from .routers.router import router
 
 
 @asynccontextmanager
@@ -25,8 +26,11 @@ async def lifespan(app: FastAPI):
         breakpoint_threshold_amount=settings.chunk_sem_threshold_amt,
     )
 
+    app.state.cross_encoder = CrossEncoder(settings.cross_encoder_model)
+    app.state.bm25_cache = {}
+
     yield
 
 
-app = FastAPI(title="DocMind Upload API", lifespan=lifespan)
-app.include_router(upload_router)
+app = FastAPI(title="DocMind API", lifespan=lifespan)
+app.include_router(router)

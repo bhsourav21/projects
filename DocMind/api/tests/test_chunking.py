@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from upload_api.services.chunking import hybrid_chunk
+from api.services.chunking import hybrid_chunk
 
 
 def test_hybrid_chunk_short_section_is_dropped():

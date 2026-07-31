@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from upload_api.app import app
+from api.app import app
 
 
 def test_upload_pdf_happy_path(client, pdf_bytes):

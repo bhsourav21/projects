@@ -1,10 +1,10 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from upload_api.app import app
+from api.app import app
 
 
 def make_minimal_pdf(text: str) -> bytes:
@@ -57,11 +57,42 @@ def fake_embeddings_create(*, input, model):
     return SimpleNamespace(data=[SimpleNamespace(embedding=[0.0] * 5) for _ in input])
 
 
+def fake_chat_completion(*, model, messages):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="mocked answer"))]
+    )
+
+
+def fake_cross_encoder_predict(pairs):
+    """Deterministic, order-preserving scores so reranking is stable in tests."""
+    return [1.0 / (i + 1) for i in range(len(pairs))]
+
+
 @pytest.fixture
 def client():
-    with TestClient(app) as test_client:
-        app.state.openai_client = MagicMock()
-        app.state.openai_client.embeddings.create.side_effect = fake_embeddings_create
-        app.state.pinecone_index = MagicMock()
-        app.state.pinecone_index.describe_index_stats.return_value = SimpleNamespace(namespaces={})
-        yield test_client
+    # CrossEncoder(...) in the lifespan would otherwise download a real model from
+    # the network on every test — patch it before startup runs.
+    with patch("api.app.CrossEncoder") as mock_cross_encoder_cls:
+        mock_cross_encoder_cls.return_value = MagicMock()
+        with TestClient(app) as test_client:
+            app.state.openai_client = MagicMock()
+            app.state.openai_client.embeddings.create.side_effect = fake_embeddings_create
+            app.state.openai_client.chat.completions.create.side_effect = fake_chat_completion
+            app.state.pinecone_index = MagicMock()
+            app.state.pinecone_index.describe_index_stats.return_value = SimpleNamespace(
+                namespaces={}
+            )
+            app.state.cross_encoder.predict.side_effect = fake_cross_encoder_predict
+            yield test_client
+
+
+@pytest.fixture
+def input_dir(tmp_path, client):
+    """Points api.state.settings.input_dir at a temp dir for the duration of a test,
+    so BM25 fixture PDFs don't need to live under the real project input/."""
+    original = app.state.settings.input_dir
+    app.state.settings.input_dir = str(tmp_path)
+    try:
+        yield tmp_path
+    finally:
+        app.state.settings.input_dir = original

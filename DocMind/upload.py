@@ -124,8 +124,4 @@ for batch_start in range(0, len(vectors), BATCH_SIZE):
     print(f"Upserted chunks {batch_start + 1} – {batch_start + len(batch)}")
 
 
-stats = index.describe_index_stats()
-print(stats)
-
-
 print(f"\nDone. Total chunks upserted: {len(vectors)}")
