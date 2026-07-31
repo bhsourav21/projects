@@ -33,4 +33,5 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DocMind API", lifespan=lifespan)
+
 app.include_router(router)
