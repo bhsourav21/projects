@@ -100,7 +100,7 @@ uv run uvicorn api.app:app --reload
 
 ```bash
 curl -F file=@input/<yourfile>.pdf http://localhost:8000/upload
-curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d '{"question": "What is a SQL warehouse?"}'
+curl -s -X POST http://localhost:8000/query -H "Content-Type: application/json" -d '{"question": "What is a SQL warehouse?"}' | jq -r '.answer'
 ```
 
 Interactive docs at `http://localhost:8000/docs`.
