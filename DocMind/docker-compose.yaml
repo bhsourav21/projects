@@ -1,0 +1,19 @@
+services:
+  vector_db:
+    build: ./vector_db
+    container_name: docmind_vector_db_c
+    env_file:
+      - .env
+    stop_grace_period: 20s
+
+  app:
+    build: .
+    container_name: docmind_app_c
+    depends_on:
+      - vector_db
+    env_file:
+      - .env
+    ports:
+      - "8003:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
