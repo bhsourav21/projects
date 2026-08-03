@@ -5,6 +5,8 @@ services:
     env_file:
       - .env
     stop_grace_period: 20s
+    networks:
+      - docmind_network
 
   app:
     build: .
@@ -17,3 +19,9 @@ services:
       - "8003:8000"
     environment:
       - PYTHONUNBUFFERED=1
+    networks:
+      - docmind_network
+
+networks:
+  docmind_network:
+    driver: bridge
