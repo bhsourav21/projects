@@ -2,7 +2,7 @@
 
 FastAPI service wrapping the DocMind pipeline: `POST /upload` chunks a PDF (regex + semantic), embeds the chunks, and upserts them into Pinecone; `POST /query` hybrid-retrieves (dense + BM25) across every indexed document, reranks with a cross-encoder, and answers with an LLM.
 
-See [api/upload_api/PLAN.md](api/upload_api/PLAN.md) and [api/query_api/PLAN.md](api/query_api/PLAN.md) for the design rationale and decisions.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a diagram of both flows, and [api/upload_api/PLAN.md](api/upload_api/PLAN.md) / [api/query_api/PLAN.md](api/query_api/PLAN.md) for the design rationale and decisions.
 
 ## Layout
 
