@@ -1,0 +1,173 @@
+Task:
+-------
+- Given a research question, agent autonomously: searches the web (Tavily API), 
+  reads retrieved pages, retrieves relevant past research from a vector store, 
+  synthesises a structured Markdown report.
+- Build with LangGraph: at least 4 nodes (plan, search, read, synthesise) with 
+  conditional edges and a human-in-the-loop approval step before execution.
+- Implement both short-term memory (conversation messages in state) and 
+  long-term memory (past research stored in Pinecone, retrieved semantically).
+- Stream intermediate steps to the terminal. Final output is a well-formatted 
+  Markdown report.
+- Test with 5 diverse research questions. Fix the 2 hardest failure cases.
+
+Solution:
+-----------
+objects needed:
+ - pinecone vector store
+ - openai api key
+ - tavily api key
+
+Input:
+ - reasearch question
+
+tools:
+ - tavily search
+ - read web retrived pages
+ - read relevant past reasearch from pinecone
+ - create report in markdown format
+ - load research in pinecone
+
+agents:
+ - supervisor
+ - research
+ - writer
+ - critic
+
+agent responsibility:
+ - supervisor agent
+    - accepts user's question
+    - passes user's question to research agent
+    - accepts response from each agent and decides which end to call next
+    - produces final response to user regarding where the research report is produced
+
+ - research agent:
+    - tavily search and get pages
+    - read pages
+    - respond to supervisor agent with page content
+
+ - similarity search agent
+    - accepts user's question
+    - retrieved top 5 relevant topics from vector DB
+    - repond to supervisor agent
+
+ - report generator agent
+    - receive outputs of research agent and similarity search agent
+    - include past 3 reponses as it is
+    - create final markdown report within 2000 tokens
+    - save report and send the path to supervisor agent
+
+ - embedding loader agent:
+    - receive 4th reponse onwards data
+    - chunk
+    - create embedding
+    - load into vector DB
+
+langraph plan:
+ - each above agent is a node
+ - START -> supervisor agent
+   supervisor agent -> research agent
+   research agent -> supervisor agent
+   supervisor agent -> similarity search agent
+   similarity search agent -> supervisor agent
+   supervisor agent -> report generator agent
+   report generator agent -> supervisor agent
+   supervisor agent -> embedding loader agent
+   embedding loader agent -> supervisor agents
+   supervisor agent -< END
+
+langraph flow description:
+ - user asks a question
+ - supervisor agent updates state variable and passes it to research agent
+ - research agent does its work, enriches state variable and and returns to supervisor agent
+ - supervisor agent checks if last reponse is from research agent, passes the control to similarity search agent
+ - similarity search agent does its work, enriches state variable and and returns to supervisor agent
+ - supervisor agent checks if last reponse is from similarity search agent, passes the control to report generator agent
+ - report generator agent does its work, enriches state variable and and returns to supervisor agent
+ - supervisor agent checks if last reponse is from report generator agent, passes the control to embedding loader agent
+ - embedding loader agent does its work, enriches state variable and and returns to supervisor agent
+ - supervisor agent checks if last reponse is from embedding loader agent, interrupts and asks if it should return the response using Human in the loop.
+ - if Human response is True, it returns the final result
+
+
+==========================================================================
+Revised Plan (after review)
+==========================================================================
+
+Decisions:
+ - No LLM supervisor. Routing is done by plain Python routing functions
+   (add_conditional_edges). Critic is out of scope for now.
+ - Chat session with follow-up questions (same thread_id across turns).
+ - Human-in-the-loop approval happens on the PLAN, before any search runs.
+
+State:
+ - messages          : Annotated[list, add_messages]   # short-term memory
+ - question          : str                              # current question
+ - memory_hits       : list    # past research + old conversation summaries from Pinecone
+ - plan              : dict    # search queries + report outline
+ - plan_feedback     : str     # user's edit/rejection reason
+ - search_results    : list    # tavily results (url, title, content)
+ - search_retries    : int
+ - page_notes        : list    # per-page condensed notes with source url
+ - report_path       : str
+
+Memory design:
+ - Short-term: last 3 Q&A pairs (6 messages: human + AI) kept verbatim in
+   state and passed to the LLM.
+ - Older Q&A pairs (4th oldest onwards): summarised by LLM, upserted into
+   Pinecone (namespace "conversation"), then removed from state
+   (RemoveMessage).
+ - Long-term research: each final report + sources upserted into Pinecone
+   (namespace "research") with metadata {question, date, urls, thread_id}.
+ - Checkpointer (MemorySaver) + thread_id keeps state between turns and is
+   required for interrupt().
+
+Nodes:
+ 1. memory_manage    - if Q&A pairs > 3 (len(messages) > 6): summarise older
+                       pairs, upsert to
+                       Pinecone "conversation", drop them from state
+ 2. memory_retrieve  - similarity search (top 5) over both namespaces using
+                       question + last 3 Q&A pairs (resolves follow-ups like
+                       "what about its cost?")
+ 3. planner          - LLM builds search queries + outline, using memory_hits
+                       and plan_feedback
+ 4. human_approval   - interrupt() showing the plan; resume with
+                       approve / reject + feedback
+ 5. search           - Tavily search for each planned query
+ 6. read             - fetch page content (Tavily raw content / extract),
+                       condense each page into notes relevant to the question,
+                       keep source url
+ 7. synthesise       - LLM writes Markdown report (<= 2000 tokens) from
+                       page_notes + memory_hits + last 3 Q&A pairs, with
+                       citations; saves to reports/<slug>_<timestamp>.md
+ 8. save_to_pinecone - chunk + embed report, upsert to "research" namespace
+                       (skip if a near-identical report already exists)
+ 9. respond          - AI message to user with summary + report path
+
+Edges:
+ START -> memory_manage -> memory_retrieve -> planner -> human_approval
+ human_approval  --(rejected)-->                 planner
+ human_approval  --(approved)-->                 search
+ search          --(no results & retries < 2)--> search (reformulated query)
+ search          --(results ok / retries out)--> read
+ read -> synthesise -> save_to_pinecone -> respond -> END
+
+ Optional branch: memory_retrieve --(strong hit, score > threshold)--> planner
+ is told to plan fewer / narrower searches.
+
+Streaming:
+ - graph.stream(..., stream_mode="updates") to print each node's progress;
+   "messages" mode for token streaming of the final report.
+
+Setup:
+ - OPENAI_API_KEY, TAVILY_API_KEY, PINECONE_API_KEY in .env
+ - Pinecone index dimension must match embedding model
+   (text-embedding-3-small = 1536)
+
+Testing:
+ - 5 diverse questions, e.g. factual/recent news, comparison, technical
+   how-to, vague/ambiguous, follow-up that depends on earlier turn.
+ - Watch for: empty search results, oversized pages blowing context,
+   first run with empty Pinecone, follow-up resolution failing, report
+   exceeding 2000 tokens.
+ - Pick the 2 hardest failures, fix, and document before/after.
